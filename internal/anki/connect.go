@@ -50,7 +50,7 @@ type notePicture struct {
 	Fields   []string `json:"fields"`
 }
 
-func (c *Client) AddNote(deckName, noteType string, fields map[string]string, imageURL string, imageField string) error {
+func (c *Client) AddNote(deckName, noteType string, fields map[string]string, imageURLs []string, imageField string) error {
 	note := noteParams{
 		DeckName:  deckName,
 		ModelName: noteType,
@@ -60,18 +60,37 @@ func (c *Client) AddNote(deckName, noteType string, fields map[string]string, im
 		},
 	}
 
-	if imageURL != "" && imageField != "" {
-		note.Picture = []notePicture{
-			{
-				URL:      imageURL,
-				Filename: fields[imageField] + ".jpg",
+	if len(imageURLs) > 0 && imageField != "" {
+		for i, url := range imageURLs {
+			note.Picture = append(note.Picture, notePicture{
+				URL:      url,
+				Filename: fmt.Sprintf("%s_%d.jpg", fields[imageField], i+1),
 				Fields:   []string{imageField},
-			},
+			})
 		}
 	}
 
 	params := addNoteParams{Note: note}
 	_, err := c.invoke("addNote", params)
+	return err
+}
+
+// FindNotes returns note IDs matching the query. Returns empty slice if none found.
+func (c *Client) FindNotes(query string) ([]int64, error) {
+	result, err := c.invoke("findNotes", map[string]string{"query": query})
+	if err != nil {
+		return nil, err
+	}
+	var ids []int64
+	if err := json.Unmarshal(result, &ids); err != nil {
+		return nil, fmt.Errorf("failed to parse findNotes result: %w", err)
+	}
+	return ids, nil
+}
+
+// GuiBrowse opens the Anki browser with the given query.
+func (c *Client) GuiBrowse(query string) error {
+	_, err := c.invoke("guiBrowse", map[string]string{"query": query})
 	return err
 }
 

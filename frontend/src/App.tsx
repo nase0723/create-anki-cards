@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, CSSProperties } from "react";
 import { EventsOn } from "../wailsjs/runtime/runtime";
-import { GetCandidates, RegisterToAnki, CheckAnkiConnection, HideWindow, QuitApp } from "../wailsjs/go/main/App";
+import { GetCandidates, RegisterToAnki, RefreshImages, BrowseInAnki, CheckAnkiConnection, HideWindow, QuitApp } from "../wailsjs/go/main/App";
 import CardBuilder from "./components/CardBuilder";
 
 interface SynonymEntry {
@@ -19,6 +19,7 @@ interface CandidateSet {
   usage: string;
   image_keywords: string[];
   image_urls: string[];
+  is_duplicate: boolean;
 }
 
 const styles: Record<string, CSSProperties> = {
@@ -67,6 +68,7 @@ function App() {
   const [state, setState] = useState<AppState>({ type: "waiting" });
   const [ankiConnected, setAnkiConnected] = useState<boolean | null>(null);
   const [registering, setRegistering] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const requestId = useRef(0);
 
   useEffect(() => {
@@ -84,6 +86,23 @@ function App() {
 
   useEffect(() => {
     const cancel = EventsOn("images:loaded", (data: { word: string; image_urls: string[] }) => {
+      setState((prev) => {
+        if (prev.type === "ready" && prev.candidates.word === data.word) {
+          const existing = new Set(prev.candidates.image_urls || []);
+          const merged = [...(prev.candidates.image_urls || [])];
+          for (const url of data.image_urls) {
+            if (!existing.has(url)) merged.push(url);
+          }
+          return { ...prev, candidates: { ...prev.candidates, image_urls: merged } };
+        }
+        return prev;
+      });
+    });
+    return cancel;
+  }, []);
+
+  useEffect(() => {
+    const cancel = EventsOn("images:refreshed", (data: { word: string; image_urls: string[] }) => {
       setState((prev) => {
         if (prev.type === "ready" && prev.candidates.word === data.word) {
           return { ...prev, candidates: { ...prev.candidates, image_urls: data.image_urls } };
@@ -107,10 +126,10 @@ function App() {
     }
   };
 
-  const handleRegister = async (word: string, meaning: string, example: string, imageUrl: string) => {
+  const handleRegister = async (word: string, meaning: string, example: string, imageUrls: string[]) => {
     setRegistering(true);
     try {
-      await RegisterToAnki({ word, meaning, example, image_url: imageUrl });
+      await RegisterToAnki({ word, meaning, example, image_urls: imageUrls });
       setState({ type: "waiting" });
       HideWindow();
     } catch (err: any) {
@@ -164,6 +183,13 @@ function App() {
           candidates={state.candidates}
           onRegister={handleRegister}
           onDismiss={handleDismiss}
+          onRefreshImages={async () => {
+            setRefreshing(true);
+            await RefreshImages(state.candidates.word);
+            setRefreshing(false);
+          }}
+          onBrowseInAnki={() => BrowseInAnki(state.candidates.word)}
+          refreshing={refreshing}
           registering={registering}
         />
       )}

@@ -17,12 +17,16 @@ interface CandidateSet {
   usage: string;
   image_keywords: string[];
   image_urls: string[];
+  is_duplicate: boolean;
 }
 
 interface CardBuilderProps {
   candidates: CandidateSet;
-  onRegister: (word: string, meaning: string, example: string, imageUrl: string) => void;
+  onRegister: (word: string, meaning: string, example: string, imageUrls: string[]) => void;
   onDismiss: () => void;
+  onRefreshImages: () => void;
+  onBrowseInAnki: () => void;
+  refreshing: boolean;
   registering: boolean;
 }
 
@@ -148,20 +152,36 @@ function FrequencyGauge({ level }: { level: string }) {
   );
 }
 
-export default function CardBuilder({ candidates, onRegister, onDismiss, registering }: CardBuilderProps) {
+export default function CardBuilder({ candidates, onRegister, onDismiss, onRefreshImages, onBrowseInAnki, refreshing, registering }: CardBuilderProps) {
   const [meanings, setMeanings] = useState(candidates.meanings);
   const [examples, setExamples] = useState(candidates.examples);
   const [selectedMeaning, setSelectedMeaning] = useState(0);
   const [selectedExample, setSelectedExample] = useState(0);
-  const [selectedImage, setSelectedImage] = useState(0);
+  const [selectedImages, setSelectedImages] = useState<Set<number>>(new Set([0]));
+
+  const toggleImage = (index: number, ctrlKey: boolean) => {
+    setSelectedImages((prev) => {
+      if (ctrlKey) {
+        const next = new Set(prev);
+        if (next.has(index)) {
+          next.delete(index);
+        } else {
+          next.add(index);
+        }
+        return next;
+      }
+      // Single select: replace with clicked image
+      return new Set([index]);
+    });
+  };
 
   const handleRegister = () => {
-    const imageUrl = candidates.image_urls?.[selectedImage] ?? "";
+    const imageUrls = (candidates.image_urls || []).filter((_, i) => selectedImages.has(i));
     onRegister(
       candidates.word,
       meanings[selectedMeaning],
       examples[selectedExample],
-      imageUrl,
+      imageUrls,
     );
   };
 
@@ -180,6 +200,19 @@ export default function CardBuilder({ candidates, onRegister, onDismiss, registe
   return (
     <div style={styles.container}>
       <div style={styles.word}>{candidates.word}</div>
+      {candidates.is_duplicate && (
+        <div style={{ textAlign: "center" as const, marginBottom: 12 }}>
+          <span style={{ padding: "3px 10px", borderRadius: 12, fontSize: 12, fontWeight: 600, backgroundColor: "#fce4ec", color: "#c62828" }}>
+            Already in Anki
+          </span>
+          <button
+            onClick={onBrowseInAnki}
+            style={{ marginLeft: 8, padding: "3px 10px", fontSize: 12, border: "1px solid #ccc", borderRadius: 12, background: "none", color: "#666", cursor: "pointer" }}
+          >
+            Browse in Anki
+          </button>
+        </div>
+      )}
       <div style={styles.meta}>
         <FrequencyGauge level={candidates.frequency} />
         <span style={{ ...styles.badge, backgroundColor: "#fff3e0", color: "#e65100" }}>
@@ -227,17 +260,26 @@ export default function CardBuilder({ candidates, onRegister, onDismiss, registe
 
         {candidates.image_urls && candidates.image_urls.length > 0 && (
           <div style={styles.section}>
-            <span style={styles.sectionLabel}>Images</span>
+            <span style={styles.sectionLabel}>
+              Images <span style={{ fontWeight: 400, color: "#aaa", fontSize: 11 }}>Ctrl+click for multi-select</span>
+              <button
+                onClick={onRefreshImages}
+                disabled={refreshing}
+                style={{ marginLeft: 8, padding: "2px 8px", fontSize: 11, border: "1px solid #ccc", borderRadius: 4, background: "none", color: refreshing ? "#ccc" : "#666", cursor: refreshing ? "default" : "pointer" }}
+              >
+                {refreshing ? "Loading..." : "Refresh"}
+              </button>
+            </span>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
               {candidates.image_urls.map((url, i) => (
                 <div
                   key={i}
-                  onClick={() => setSelectedImage(i)}
+                  onClick={(e) => toggleImage(i, e.ctrlKey || e.metaKey)}
                   style={{
                     aspectRatio: "1",
                     borderRadius: 8,
                     overflow: "hidden",
-                    border: i === selectedImage ? "3px solid #4a90d9" : "3px solid transparent",
+                    border: selectedImages.has(i) ? "3px solid #4a90d9" : "3px solid transparent",
                     cursor: "pointer",
                   }}
                 >

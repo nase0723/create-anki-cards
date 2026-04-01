@@ -15,33 +15,33 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-// wordTrigger abstracts clipboard polling vs hotkey trigger.
 type wordTrigger interface {
 	Start()
 	Stop()
 }
 
-// imageSearcher abstracts image search providers.
 type imageSearcher interface {
 	Search(keywords string, count int) ([]string, error)
 }
 
+const maxImages = 9
+
 type App struct {
-	ctx      context.Context
-	config   *config.Config
-	ai       *ai.Client
-	anki     *anki.Client
-	images   []imageSearcher
-	cache    *cache.Cache
-	trigger  wordTrigger
-	wordCh   <-chan string
+	ctx     context.Context
+	config  *config.Config
+	ai      *ai.Client
+	anki    *anki.Client
+	images  []imageSearcher
+	cache   *cache.Cache
+	trigger wordTrigger
+	wordCh  <-chan string
 }
 
 type AnkiCard struct {
-	Word     string `json:"word"`
-	Meaning  string `json:"meaning"`
-	Example  string `json:"example"`
-	ImageURL string `json:"image_url"`
+	Word      string   `json:"word"`
+	Meaning   string   `json:"meaning"`
+	Example   string   `json:"example"`
+	ImageURLs []string `json:"image_urls"`
 }
 
 func NewApp(cfg *config.Config, c *cache.Cache) *App {
@@ -64,12 +64,10 @@ func NewApp(cfg *config.Config, c *cache.Cache) *App {
 		h := clipboard.NewHotkeyTrigger()
 		app.trigger = h
 		app.wordCh = h.WordCh
-		log.Println("trigger mode: hotkey (Ctrl+Shift+W)")
-	default: // "polling"
+	default:
 		m := clipboard.NewMonitor(cfg.PollIntervalMs)
 		app.trigger = m
 		app.wordCh = m.WordCh
-		log.Println("trigger mode: polling")
 	}
 
 	return app
@@ -85,7 +83,6 @@ func (a *App) shutdown(ctx context.Context) {
 	a.trigger.Stop()
 }
 
-// beforeClose intercepts window close and hides instead.
 func (a *App) beforeClose(ctx context.Context) (prevent bool) {
 	runtime.WindowHide(ctx)
 	return true
@@ -99,68 +96,52 @@ func (a *App) listenWords() {
 }
 
 func (a *App) GetCandidates(word string) (*cache.CandidateSet, error) {
+	isDuplicate, _ := a.CheckDuplicate(word)
+
 	if cs, ok := a.cache.Get(word); ok {
+		cs.IsDuplicate = isDuplicate
 		return cs, nil
 	}
 
-	result, err := a.ai.Generate(word)
+	cs, err := a.ai.Generate(word)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate candidates: %w", err)
 	}
-
-	synonyms := make([]cache.SynonymEntry, len(result.Synonyms))
-	for i, s := range result.Synonyms {
-		synonyms[i] = cache.SynonymEntry{Word: s.Word, Difference: s.Difference}
-	}
-
-	cs := &cache.CandidateSet{
-		Word:          word,
-		Meanings:      result.Meanings,
-		Examples:      result.Examples,
-		CoreImage:     result.CoreImage,
-		Synonyms:      synonyms,
-		Frequency:     result.Frequency,
-		Priority:      result.Priority,
-		Usage:         result.Usage,
-		ImageKeywords: result.ImageKeywords,
-	}
+	cs.IsDuplicate = isDuplicate
 
 	if err := a.cache.Put(word, cs); err != nil {
 		log.Printf("warning: failed to cache result for %q: %v", word, err)
 	}
 
-	// Fetch images asynchronously: word itself + first AI-generated keyword
 	if len(a.images) > 0 {
-		aiKeyword := ""
-		if len(result.ImageKeywords) > 0 {
-			aiKeyword = result.ImageKeywords[0]
-		}
-		go a.fetchImages(word, [2]string{word, aiKeyword})
+		keywords := append([]string{word}, cs.ImageKeywords...)
+		go a.emitImages(word, a.searchImages(keywords, nil))
 	}
 
 	return cs, nil
 }
 
-func (a *App) fetchImages(word string, keywordSets [2]string) {
-	// 2 keyword sets × N providers in parallel, 2 images each
+// searchImages fetches images from all providers in parallel, excluding previousURLs.
+func (a *App) searchImages(keywords []string, previousURLs map[string]bool) []string {
 	type result struct {
 		urls []string
 		err  error
 	}
-	totalJobs := 2 * len(a.images)
+
+	var validKeywords []string
+	for _, kw := range keywords {
+		if kw != "" {
+			validKeywords = append(validKeywords, kw)
+		}
+	}
+
+	totalJobs := len(validKeywords) * len(a.images)
 	ch := make(chan result, totalJobs)
 
-	for _, kw := range keywordSets {
-		if kw == "" {
-			totalJobs -= len(a.images)
-			continue
-		}
+	for _, kw := range validKeywords {
 		for _, provider := range a.images {
 			go func(p imageSearcher, keywords string) {
-				urls, err := p.Search(keywords, 3)
-				if len(urls) > 2 {
-					urls = urls[:2]
-				}
+				urls, err := p.Search(keywords, 5)
 				ch <- result{urls, err}
 			}(provider, kw)
 		}
@@ -170,28 +151,70 @@ func (a *App) fetchImages(word string, keywordSets [2]string) {
 	for i := 0; i < totalJobs; i++ {
 		r := <-ch
 		if r.err != nil {
-			log.Printf("warning: image search failed for %q: %v", word, r.err)
+			log.Printf("warning: image search failed: %v", r.err)
 			continue
 		}
-		allURLs = append(allURLs, r.urls...)
+		for _, u := range r.urls {
+			if previousURLs == nil || !previousURLs[u] {
+				allURLs = append(allURLs, u)
+			}
+		}
 	}
 
-	if len(allURLs) == 0 {
+	if len(allURLs) > maxImages {
+		allURLs = allURLs[:maxImages]
+	}
+	return allURLs
+}
+
+// emitImages updates cache and notifies frontend.
+func (a *App) emitImages(word string, urls []string) {
+	if len(urls) == 0 {
+		return
+	}
+	if cs, ok := a.cache.Get(word); ok {
+		cs.ImageURLs = urls
+		_ = a.cache.Put(word, cs)
+	}
+	runtime.EventsEmit(a.ctx, "images:loaded", map[string]interface{}{
+		"word":       word,
+		"image_urls": urls,
+	})
+}
+
+func (a *App) RefreshImages(word string) {
+	if len(a.images) == 0 {
 		return
 	}
 
-	// Update cache with image URLs
+	var excludeKeywords []string
 	if cs, ok := a.cache.Get(word); ok {
-		cs.ImageURLs = allURLs
-		if err := a.cache.Put(word, cs); err != nil {
-			log.Printf("warning: failed to update cache for %q: %v", word, err)
-		}
+		excludeKeywords = cs.ImageKeywords
 	}
 
-	// Notify frontend
-	runtime.EventsEmit(a.ctx, "images:loaded", map[string]interface{}{
+	newKeyword, err := a.ai.GenerateImageKeywords(word, excludeKeywords)
+	if err != nil {
+		log.Printf("warning: failed to generate new keywords for %q: %v", word, err)
+		return
+	}
+
+	if cs, ok := a.cache.Get(word); ok {
+		cs.ImageKeywords = append(cs.ImageKeywords, newKeyword)
+		_ = a.cache.Put(word, cs)
+	}
+
+	urls := a.searchImages([]string{newKeyword}, nil)
+	if len(urls) == 0 {
+		return
+	}
+
+	if cs, ok := a.cache.Get(word); ok {
+		cs.ImageURLs = urls
+		_ = a.cache.Put(word, cs)
+	}
+	runtime.EventsEmit(a.ctx, "images:refreshed", map[string]interface{}{
 		"word":       word,
-		"image_urls": allURLs,
+		"image_urls": urls,
 	})
 }
 
@@ -207,25 +230,34 @@ func (a *App) RegisterToAnki(card AnkiCard) error {
 			fields[fieldName] = card.Example
 		}
 	}
+	return a.anki.AddNote(a.config.DeckName, a.config.NoteType, fields, card.ImageURLs, a.config.FieldMapping["image"])
+}
 
-	imageField := a.config.FieldMapping["image"]
-	return a.anki.AddNote(a.config.DeckName, a.config.NoteType, fields, card.ImageURL, imageField)
+func (a *App) CheckDuplicate(word string) (bool, error) {
+	wordField := a.config.FieldMapping["word"]
+	ids, err := a.anki.FindNotes(fmt.Sprintf("%s:%s", wordField, word))
+	if err != nil {
+		return false, err
+	}
+	return len(ids) > 0, nil
+}
+
+func (a *App) BrowseInAnki(word string) error {
+	wordField := a.config.FieldMapping["word"]
+	return a.anki.GuiBrowse(fmt.Sprintf("%s:%s", wordField, word))
 }
 
 func (a *App) CheckAnkiConnection() (bool, error) {
-	err := a.anki.CheckConnection()
-	if err != nil {
+	if err := a.anki.CheckConnection(); err != nil {
 		return false, err
 	}
 	return true, nil
 }
 
-// HideWindow hides the window (called from frontend after dismiss).
 func (a *App) HideWindow() {
 	runtime.WindowHide(a.ctx)
 }
 
-// QuitApp exits the application.
 func (a *App) QuitApp() {
 	runtime.Quit(a.ctx)
 }

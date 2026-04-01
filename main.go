@@ -3,7 +3,6 @@ package main
 import (
 	"embed"
 	"log"
-	"net"
 
 	"create-anki-cards/internal/cache"
 	"create-anki-cards/internal/config"
@@ -17,14 +16,6 @@ import (
 var assets embed.FS
 
 func main() {
-	// Single instance check: port is auto-released when process exits
-	listener, err := net.Listen("tcp", "127.0.0.1:19384")
-	if err != nil {
-		log.Println("Another instance is already running, exiting.")
-		return
-	}
-	defer listener.Close()
-
 	cfg, err := config.Load("config.json")
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
