@@ -90,16 +90,17 @@ func (a *App) beforeClose(ctx context.Context) (prevent bool) {
 
 func (a *App) listenWords() {
 	for word := range a.wordCh {
+		if isDup, _ := a.CheckDuplicate(word); isDup {
+			_ = a.BrowseInAnki(word)
+			continue
+		}
 		runtime.WindowShow(a.ctx)
 		runtime.EventsEmit(a.ctx, "word:detected", word)
 	}
 }
 
 func (a *App) GetCandidates(word string) (*cache.CandidateSet, error) {
-	isDuplicate, _ := a.CheckDuplicate(word)
-
 	if cs, ok := a.cache.Get(word); ok {
-		cs.IsDuplicate = isDuplicate
 		return cs, nil
 	}
 
@@ -107,7 +108,6 @@ func (a *App) GetCandidates(word string) (*cache.CandidateSet, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate candidates: %w", err)
 	}
-	cs.IsDuplicate = isDuplicate
 
 	if err := a.cache.Put(word, cs); err != nil {
 		log.Printf("warning: failed to cache result for %q: %v", word, err)

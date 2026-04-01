@@ -17,7 +17,6 @@ interface CandidateSet {
   usage: string;
   image_keywords: string[];
   image_urls: string[];
-  is_duplicate: boolean;
 }
 
 interface CardBuilderProps {
@@ -25,7 +24,6 @@ interface CardBuilderProps {
   onRegister: (word: string, meaning: string, example: string, imageUrls: string[]) => void;
   onDismiss: () => void;
   onRefreshImages: () => void;
-  onBrowseInAnki: () => void;
   refreshing: boolean;
   registering: boolean;
 }
@@ -152,7 +150,7 @@ function FrequencyGauge({ level }: { level: string }) {
   );
 }
 
-export default function CardBuilder({ candidates, onRegister, onDismiss, onRefreshImages, onBrowseInAnki, refreshing, registering }: CardBuilderProps) {
+export default function CardBuilder({ candidates, onRegister, onDismiss, onRefreshImages, refreshing, registering }: CardBuilderProps) {
   const [meanings, setMeanings] = useState(candidates.meanings);
   const [examples, setExamples] = useState(candidates.examples);
   const [selectedMeaning, setSelectedMeaning] = useState(0);
@@ -200,19 +198,6 @@ export default function CardBuilder({ candidates, onRegister, onDismiss, onRefre
   return (
     <div style={styles.container}>
       <div style={styles.word}>{candidates.word}</div>
-      {candidates.is_duplicate && (
-        <div style={{ textAlign: "center" as const, marginBottom: 12 }}>
-          <span style={{ padding: "3px 10px", borderRadius: 12, fontSize: 12, fontWeight: 600, backgroundColor: "#fce4ec", color: "#c62828" }}>
-            Already in Anki
-          </span>
-          <button
-            onClick={onBrowseInAnki}
-            style={{ marginLeft: 8, padding: "3px 10px", fontSize: 12, border: "1px solid #ccc", borderRadius: 12, background: "none", color: "#666", cursor: "pointer" }}
-          >
-            Browse in Anki
-          </button>
-        </div>
-      )}
       <div style={styles.meta}>
         <FrequencyGauge level={candidates.frequency} />
         <span style={{ ...styles.badge, backgroundColor: "#fff3e0", color: "#e65100" }}>
@@ -275,6 +260,7 @@ export default function CardBuilder({ candidates, onRegister, onDismiss, onRefre
                 <div
                   key={i}
                   onClick={(e) => toggleImage(i, e.ctrlKey || e.metaKey)}
+                  onDoubleClick={() => setSelectedImages(new Set())}
                   style={{
                     aspectRatio: "1",
                     borderRadius: 8,

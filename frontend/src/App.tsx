@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, CSSProperties } from "react";
 import { EventsOn } from "../wailsjs/runtime/runtime";
-import { GetCandidates, RegisterToAnki, RefreshImages, BrowseInAnki, CheckAnkiConnection, HideWindow, QuitApp } from "../wailsjs/go/main/App";
+import { GetCandidates, RegisterToAnki, RefreshImages, CheckAnkiConnection, HideWindow, QuitApp } from "../wailsjs/go/main/App";
 import CardBuilder from "./components/CardBuilder";
 
 interface SynonymEntry {
@@ -19,7 +19,6 @@ interface CandidateSet {
   usage: string;
   image_keywords: string[];
   image_urls: string[];
-  is_duplicate: boolean;
 }
 
 const styles: Record<string, CSSProperties> = {
@@ -188,7 +187,6 @@ function App() {
             await RefreshImages(state.candidates.word);
             setRefreshing(false);
           }}
-          onBrowseInAnki={() => BrowseInAnki(state.candidates.word)}
           refreshing={refreshing}
           registering={registering}
         />
