@@ -1,0 +1,16 @@
+{
+  "openai_api_key": "sk-...",
+  "ankiconnect_url": "http://localhost:8765",
+  "deck_name": "English Vocabulary",
+  "note_type": "EnglishVocab",
+  "field_mapping": {
+    "word": "Word",
+    "meaning": "Meaning",
+    "example": "Example",
+    "image": "Image"
+  },
+  "poll_interval_ms": 500,
+  "trigger_mode": "polling",
+  "pixabay_api_key": "",
+  "pexels_api_key": ""
+}
