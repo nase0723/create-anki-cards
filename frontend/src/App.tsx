@@ -77,6 +77,17 @@ function App() {
   }, []);
 
   useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setState({ type: "waiting" });
+        HideWindow();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  useEffect(() => {
     const cancel = EventsOn("word:detected", (word: string) => {
       loadCandidates(word);
     });
