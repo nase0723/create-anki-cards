@@ -13,12 +13,8 @@ import (
 	"create-anki-cards/internal/image"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"golang.design/x/hotkey"
 )
-
-type wordTrigger interface {
-	Start()
-	Stop()
-}
 
 type imageSearcher interface {
 	Search(keywords string, count int) ([]string, error)
@@ -33,8 +29,7 @@ type App struct {
 	anki    *anki.Client
 	images  []imageSearcher
 	cache   *cache.Cache
-	trigger wordTrigger
-	wordCh  <-chan string
+	monitor *clipboard.Monitor
 }
 
 type AnkiCard struct {
@@ -59,28 +54,20 @@ func NewApp(cfg *config.Config, c *cache.Cache) *App {
 		app.images = append(app.images, image.NewPexelsClient(cfg.PexelsAPIKey))
 	}
 
-	switch cfg.TriggerMode {
-	case "hotkey":
-		h := clipboard.NewHotkeyTrigger()
-		app.trigger = h
-		app.wordCh = h.WordCh
-	default:
-		m := clipboard.NewMonitor(cfg.PollIntervalMs)
-		app.trigger = m
-		app.wordCh = m.WordCh
-	}
+	app.monitor = clipboard.NewMonitor(cfg.PollIntervalMs)
 
 	return app
 }
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
-	a.trigger.Start()
+	a.monitor.Start()
 	go a.listenWords()
+	go a.listenHotkey()
 }
 
 func (a *App) shutdown(ctx context.Context) {
-	a.trigger.Stop()
+	a.monitor.Stop()
 }
 
 func (a *App) beforeClose(ctx context.Context) (prevent bool) {
@@ -89,14 +76,31 @@ func (a *App) beforeClose(ctx context.Context) (prevent bool) {
 }
 
 func (a *App) listenWords() {
-	for word := range a.wordCh {
-		if isDup, _ := a.CheckDuplicate(word); isDup {
-			_ = a.BrowseInAnki(word)
-			continue
-		}
-		runtime.WindowShow(a.ctx)
-		runtime.EventsEmit(a.ctx, "word:detected", word)
+	for word := range a.monitor.WordCh {
+		a.processWord(word)
 	}
+}
+
+func (a *App) listenHotkey() {
+	hk := hotkey.New([]hotkey.Modifier{hotkey.ModCtrl}, hotkey.KeyB)
+	if err := hk.Register(); err != nil {
+		log.Printf("failed to register hotkey Ctrl+B: %v", err)
+		return
+	}
+	for range hk.Keydown() {
+		if word, ok := clipboard.ReadClipboardWord(); ok {
+			a.processWord(word)
+		}
+	}
+}
+
+func (a *App) processWord(word string) {
+	if isDup, _ := a.CheckDuplicate(word); isDup {
+		_ = a.BrowseInAnki(word)
+		return
+	}
+	runtime.WindowShow(a.ctx)
+	runtime.EventsEmit(a.ctx, "word:detected", word)
 }
 
 func (a *App) GetCandidates(word string) (*cache.CandidateSet, error) {

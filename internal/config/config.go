@@ -13,7 +13,6 @@ type Config struct {
 	NoteType       string            `json:"note_type"`
 	FieldMapping   map[string]string `json:"field_mapping"`
 	PollIntervalMs int               `json:"poll_interval_ms"`
-	TriggerMode    string            `json:"trigger_mode"` // "hotkey" or "polling"
 	PixabayAPIKey  string            `json:"pixabay_api_key"`
 	PexelsAPIKey   string            `json:"pexels_api_key"`
 }
@@ -34,7 +33,6 @@ func Load(path string) (*Config, error) {
 			"example": "Example",
 		},
 		PollIntervalMs: 500,
-		TriggerMode:    "polling",
 	}
 
 	if err := json.Unmarshal(data, cfg); err != nil {
