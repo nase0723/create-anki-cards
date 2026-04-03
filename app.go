@@ -42,7 +42,7 @@ type AnkiCard struct {
 func NewApp(cfg *config.Config, c *cache.Cache) *App {
 	app := &App{
 		config: cfg,
-		ai:     ai.NewClient(cfg.OpenAIKey),
+		ai:     ai.NewClient(cfg.GeminiAPIKey, cfg.GeminiModel),
 		anki:   anki.NewClient(cfg.AnkiConnectURL),
 		cache:  c,
 	}
@@ -54,20 +54,26 @@ func NewApp(cfg *config.Config, c *cache.Cache) *App {
 		app.images = append(app.images, image.NewPexelsClient(cfg.PexelsAPIKey))
 	}
 
-	app.monitor = clipboard.NewMonitor(cfg.PollIntervalMs)
+	if cfg.PollingEnabled {
+		app.monitor = clipboard.NewMonitor(cfg.PollIntervalMs)
+	}
 
 	return app
 }
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
-	a.monitor.Start()
-	go a.listenWords()
+	if a.monitor != nil {
+		a.monitor.Start()
+		go a.listenWords()
+	}
 	go a.listenHotkey()
 }
 
 func (a *App) shutdown(ctx context.Context) {
-	a.monitor.Stop()
+	if a.monitor != nil {
+		a.monitor.Stop()
+	}
 }
 
 func (a *App) beforeClose(ctx context.Context) (prevent bool) {
