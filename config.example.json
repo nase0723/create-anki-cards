@@ -1,16 +1,16 @@
 {
-  "openai_api_key": "sk-...",
+  "gemini_api_key": "",
   "ankiconnect_url": "http://localhost:8765",
-  "deck_name": "English Vocabulary",
-  "note_type": "EnglishVocab",
+  "deck_name": "Default",
+  "note_type": "Basic",
   "field_mapping": {
-    "word": "Word",
-    "meaning": "Meaning",
-    "example": "Example",
-    "image": "Image"
+    "word": "word",
+    "meaning": "meaning",
+    "example": "example",
+    "image": "image"
   },
   "poll_interval_ms": 500,
-  "trigger_mode": "polling",
+  "polling_enabled": false,
   "pixabay_api_key": "",
   "pexels_api_key": ""
 }

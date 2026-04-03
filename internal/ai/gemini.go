@@ -13,10 +13,11 @@ import (
 
 type Client struct {
 	apiKey string
+	model  string
 }
 
-func NewClient(apiKey string) *Client {
-	return &Client{apiKey: apiKey}
+func NewClient(apiKey, model string) *Client {
+	return &Client{apiKey: apiKey, model: model}
 }
 
 type aiResult struct {
@@ -58,39 +59,46 @@ func (r *aiResult) toCandidateSet(word string) *cache.CandidateSet {
 	}
 }
 
-type chatRequest struct {
-	Model          string        `json:"model"`
-	Messages       []chatMessage `json:"messages"`
-	ResponseFormat *respFormat   `json:"response_format,omitempty"`
+type geminiRequest struct {
+	Contents         []geminiContent  `json:"contents"`
+	GenerationConfig *geminiGenConfig `json:"generationConfig,omitempty"`
 }
 
-type chatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+type geminiContent struct {
+	Parts []geminiPart `json:"parts"`
 }
 
-type respFormat struct {
-	Type string `json:"type"`
+type geminiPart struct {
+	Text string `json:"text"`
 }
 
-type chatResponse struct {
-	Choices []struct {
-		Message struct {
-			Content string `json:"content"`
-		} `json:"message"`
-	} `json:"choices"`
+type geminiGenConfig struct {
+	ResponseMimeType string `json:"responseMimeType,omitempty"`
+}
+
+type geminiResponse struct {
+	Candidates []struct {
+		Content struct {
+			Parts []struct {
+				Text string `json:"text"`
+			} `json:"parts"`
+		} `json:"content"`
+	} `json:"candidates"`
 	Error *struct {
 		Message string `json:"message"`
 	} `json:"error,omitempty"`
 }
 
 func (c *Client) chatCompletion(prompt string) (string, error) {
-	req := chatRequest{
-		Model: "gpt-4o-mini",
-		Messages: []chatMessage{
-			{Role: "user", Content: prompt},
+	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s", c.model, c.apiKey)
+
+	req := geminiRequest{
+		Contents: []geminiContent{
+			{Parts: []geminiPart{{Text: prompt}}},
 		},
-		ResponseFormat: &respFormat{Type: "json_object"},
+		GenerationConfig: &geminiGenConfig{
+			ResponseMimeType: "application/json",
+		},
 	}
 
 	body, err := json.Marshal(req)
@@ -98,16 +106,15 @@ func (c *Client) chatCompletion(prompt string) (string, error) {
 		return "", fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	httpReq, err := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions", bytes.NewReader(body))
+	httpReq, err := http.NewRequest("POST", url, bytes.NewReader(body))
 	if err != nil {
 		return "", fmt.Errorf("failed to create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
 
 	resp, err := http.DefaultClient.Do(httpReq)
 	if err != nil {
-		return "", fmt.Errorf("failed to call OpenAI API: %w", err)
+		return "", fmt.Errorf("failed to call Gemini API: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -116,20 +123,20 @@ func (c *Client) chatCompletion(prompt string) (string, error) {
 		return "", fmt.Errorf("failed to read response: %w", err)
 	}
 
-	var chatResp chatResponse
-	if err := json.Unmarshal(respBody, &chatResp); err != nil {
+	var geminiResp geminiResponse
+	if err := json.Unmarshal(respBody, &geminiResp); err != nil {
 		return "", fmt.Errorf("failed to parse response: %w", err)
 	}
 
-	if chatResp.Error != nil {
-		return "", fmt.Errorf("OpenAI API error: %s", chatResp.Error.Message)
+	if geminiResp.Error != nil {
+		return "", fmt.Errorf("Gemini API error: %s", geminiResp.Error.Message)
 	}
 
-	if len(chatResp.Choices) == 0 {
-		return "", fmt.Errorf("no response from OpenAI")
+	if len(geminiResp.Candidates) == 0 || len(geminiResp.Candidates[0].Content.Parts) == 0 {
+		return "", fmt.Errorf("no response from Gemini")
 	}
 
-	return chatResp.Choices[0].Message.Content, nil
+	return geminiResp.Candidates[0].Content.Parts[0].Text, nil
 }
 
 func (c *Client) Generate(word string) (*cache.CandidateSet, error) {
